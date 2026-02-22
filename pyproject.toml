@@ -1,0 +1,43 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.backends.legacy:build"
+
+[project]
+name = "tokenr"
+version = "0.1.0"
+description = "Automatic LLM cost tracking for OpenAI, Anthropic, and more"
+readme = "README.md"
+license = { text = "MIT" }
+authors = [{ name = "Tokenr", email = "support@tokenr.co" }]
+requires-python = ">=3.8"
+dependencies = ["requests>=2.25.0"]
+keywords = ["llm", "openai", "anthropic", "cost", "tracking", "monitoring", "finops"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+    "black>=22.0.0",
+    "flake8>=4.0.0",
+]
+
+[project.urls]
+Homepage = "https://tokenr.co"
+Documentation = "https://tokenr.co/docs/api"
+Repository = "https://github.com/tokenr-co/tokenr-python"
+"Bug Reports" = "https://github.com/tokenr-co/tokenr-python/issues"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["tokenr*"]
