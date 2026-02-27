@@ -24,7 +24,7 @@ try:
 except ImportError:
     requests = None
 
-__version__ = "0.1.0"
+__version__ = "0.1.2"
 
 # Global configuration
 _config = {
@@ -107,6 +107,8 @@ def track(
     model: str,
     input_tokens: int,
     output_tokens: int,
+    cache_read_tokens: int = 0,
+    cache_write_tokens: int = 0,
     agent_id: Optional[str] = None,
     feature_name: Optional[str] = None,
     team_id: Optional[str] = None,
@@ -144,6 +146,8 @@ def track(
         "model": model,
         "input_tokens": input_tokens,
         "output_tokens": output_tokens,
+        "cache_read_tokens": cache_read_tokens if cache_read_tokens else None,
+        "cache_write_tokens": cache_write_tokens if cache_write_tokens else None,
         "agent_id": agent_id or _config["default_agent_id"],
         "feature_name": feature_name,
         "team_id": team_id,
@@ -188,6 +192,33 @@ def _send_tracking(data: Dict[str, Any]):
     thread.start()
 
 
+# Maps base URL substrings to Tokenr provider slugs for OpenAI-compatible APIs
+_OPENAI_COMPAT_PROVIDERS = {
+    "minimax": "minimax",
+    "anthropic": "anthropic",
+    "googleapis": "google",
+    "mistral": "mistral",
+    "cohere": "cohere",
+    "deepseek": "deepseek",
+    "x.ai": "xai",
+    "xai": "xai",
+    "azure": "azure_openai",
+}
+
+
+def _detect_provider(completions_self) -> str:
+    """Detect the real provider slug from an OpenAI Completions instance's base URL."""
+    try:
+        client = getattr(completions_self, "_client", None)
+        base_url = str(getattr(client, "base_url", "") or "").lower()
+        for keyword, slug in _OPENAI_COMPAT_PROVIDERS.items():
+            if keyword in base_url:
+                return slug
+    except Exception:
+        pass
+    return "openai"
+
+
 def _patch_openai():
     """Automatically patch OpenAI client to track usage"""
     try:
@@ -222,11 +253,22 @@ def _patch_openai():
 
         # Track usage if available
         if hasattr(response, 'usage') and response.usage:
+            provider = _detect_provider(self)
+
+            # Extract cache token counts from prompt_tokens_details if present.
+            # prompt_tokens = non-cached input + cached reads (all billed together by the
+            # provider but at different rates). We separate them so Tokenr can price each
+            # category correctly.
+            details = getattr(response.usage, 'prompt_tokens_details', None)
+            cache_read = int(getattr(details, 'cached_tokens', 0) or 0)
+            non_cached_input = (response.usage.prompt_tokens or 0) - cache_read
+
             track(
-                provider="openai",
+                provider=provider,
                 model=response.model,
-                input_tokens=response.usage.prompt_tokens,
+                input_tokens=max(non_cached_input, 0),
                 output_tokens=response.usage.completion_tokens,
+                cache_read_tokens=cache_read,
                 agent_id=agent_id,
                 feature_name=feature_name,
                 team_id=team_id,
@@ -270,11 +312,18 @@ def _patch_anthropic():
 
         # Track usage if available
         if hasattr(response, 'usage') and response.usage:
+            # Anthropic reports cache tokens explicitly and separately from input_tokens.
+            # input_tokens = non-cached input only (already excludes cache hits/writes).
+            cache_write = int(getattr(response.usage, 'cache_creation_input_tokens', 0) or 0)
+            cache_read  = int(getattr(response.usage, 'cache_read_input_tokens', 0) or 0)
+
             track(
                 provider="anthropic",
                 model=response.model,
                 input_tokens=response.usage.input_tokens,
                 output_tokens=response.usage.output_tokens,
+                cache_write_tokens=cache_write,
+                cache_read_tokens=cache_read,
                 agent_id=agent_id,
                 feature_name=feature_name,
                 team_id=team_id,
