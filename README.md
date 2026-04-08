@@ -179,17 +179,19 @@ Add any of these to OpenAI or Anthropic calls:
 
 ```python
 tokenr.track(
-    provider="openai",    # required
-    model="gpt-4",        # required
-    input_tokens=100,     # required
-    output_tokens=50,     # required
+    provider="openai",        # required
+    model="gpt-4",            # required
+    input_tokens=100,         # required
+    output_tokens=50,         # required
+    cache_read_tokens=0,      # tokens served from prompt cache
+    cache_write_tokens=0,     # tokens written to prompt cache
     agent_id=None,
     feature_name=None,
     team_id=None,
-    status="success",     # "success" or "error"
+    status="success",         # "success" or "error"
     latency_ms=None,
     tags=None,
-    requested_at=None,    # ISO 8601 timestamp; defaults to now
+    requested_at=None,        # ISO 8601 timestamp; defaults to now
 )
 ```
 
@@ -202,6 +204,29 @@ tokenr.track(
 | Google AI| Coming soon   | Yes             |
 | Cohere   | Coming soon   | Yes             |
 | Custom   | —             | Yes             |
+
+## Prompt Caching
+
+Both OpenAI and Anthropic support prompt caching, and the SDK handles it automatically. You don't need to do anything special.
+
+**OpenAI** includes cached tokens inside `prompt_tokens`. The SDK reads `prompt_tokens_details.cached_tokens` and separates them so Tokenr can price each category at the correct rate.
+
+**Anthropic** reports cache tokens as separate fields (`cache_creation_input_tokens` and `cache_read_input_tokens`). The SDK passes these through directly.
+
+In both cases, the Tokenr server applies the right per-token rate for input, output, cache reads, and cache writes.
+
+For manual tracking, you can pass cache tokens explicitly:
+
+```python
+tokenr.track(
+    provider="anthropic",
+    model="claude-sonnet-4-20250514",
+    input_tokens=500,
+    output_tokens=200,
+    cache_read_tokens=8000,
+    cache_write_tokens=2000,
+)
+```
 
 ## How It Works
 
@@ -242,6 +267,18 @@ tokenr.init(token="your-token", debug=True)
 3. Check network access to `tokenr.co`
 
 **Errors?** The SDK never raises — it always fails silently. Use `debug=True` to see what's happening.
+
+## Running Tests
+
+```bash
+# Unit and mock tests (no API keys needed)
+python -m unittest discover tests -v
+
+# Live integration tests (makes real API calls, costs fractions of a cent)
+OPENAI_API_KEY=sk-... ANTHROPIC_API_KEY=sk-ant-... python -m unittest tests.test_live_integration -v
+```
+
+The live tests make a real call to each provider, then verify that the token counts in the Tokenr payload match what the provider actually returned. This includes a test that triggers Anthropic prompt caching and confirms cache tokens are extracted correctly.
 
 ## Security
 

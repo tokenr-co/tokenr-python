@@ -122,54 +122,54 @@ class TestLiveAnthropic(unittest.TestCase):
               f"cache_read={data.get('cache_read_tokens', 0)}")
 
     @patch.object(tokenr, "_send_tracking")
-    def test_real_anthropic_with_prompt_caching(self, mock_send):
-        """Make an Anthropic call with a system prompt large enough to trigger caching."""
+    def test_real_anthropic_with_cache_write(self, mock_send):
+        """Make an Anthropic call with a large system prompt and verify cache_write extraction."""
         import anthropic
 
         client = anthropic.Anthropic(api_key=ANTHROPIC_KEY)
         tokenr._patch_anthropic()
 
-        # System prompt must be >1024 tokens to be cache-eligible.
-        # We use a large block of text to ensure caching is triggered.
-        long_system = "You are a helpful assistant. " * 200  # ~1000 words
+        # ~5000 tokens of padding — well above the 1024 minimum for caching.
+        long_system = "The quick brown fox jumped over the lazy dog. " * 500
 
-        # First call: should write to cache
-        response1 = client.messages.create(
-            model="claude-haiku-4-5-20251001",
-            max_tokens=10,
+        response = client.messages.create(
+            model="claude-sonnet-4-20250514",
+            max_tokens=5,
             system=[{"type": "text", "text": long_system, "cache_control": {"type": "ephemeral"}}],
             messages=[{"role": "user", "content": "Say hi"}],
         )
 
-        if mock_send.called:
-            data1 = mock_send.call_args[0][0]
-            cache_write_1 = data1.get("cache_write_tokens", 0)
-            cache_read_1 = data1.get("cache_read_tokens", 0)
-            print(f"\n  Call 1 (cache write): input={data1['input_tokens']}, "
-                  f"cache_write={cache_write_1}, cache_read={cache_read_1}")
+        self.assertTrue(mock_send.called, "track() was not called")
+        data = mock_send.call_args[0][0]
 
-        mock_send.reset_mock()
+        # Ground truth from raw response
+        raw_cache_write = int(getattr(response.usage, 'cache_creation_input_tokens', 0) or 0)
+        raw_cache_read = int(getattr(response.usage, 'cache_read_input_tokens', 0) or 0)
+        raw_input = response.usage.input_tokens
 
-        # Second call with same system prompt: should read from cache
-        response2 = client.messages.create(
-            model="claude-haiku-4-5-20251001",
-            max_tokens=10,
-            system=[{"type": "text", "text": long_system, "cache_control": {"type": "ephemeral"}}],
-            messages=[{"role": "user", "content": "Say bye"}],
-        )
+        # Verify SDK extracted correctly
+        self.assertEqual(data["input_tokens"], raw_input)
+        self.assertEqual(data.get("cache_write_tokens", 0), raw_cache_write)
+        self.assertEqual(data.get("cache_read_tokens", 0), raw_cache_read)
 
-        if mock_send.called:
-            data2 = mock_send.call_args[0][0]
-            cache_write_2 = data2.get("cache_write_tokens", 0)
-            cache_read_2 = data2.get("cache_read_tokens", 0)
-            print(f"  Call 2 (cache read):  input={data2['input_tokens']}, "
-                  f"cache_write={cache_write_2}, cache_read={cache_read_2}")
+        # With a ~5000 token system prompt + cache_control, Anthropic MUST report
+        # either a cache write (first call) or cache read (subsequent calls).
+        total_cache = raw_cache_write + raw_cache_read
+        self.assertGreater(total_cache, 0,
+                           f"Expected cache_creation or cache_read > 0 with ~5000 token system prompt "
+                           f"(got: input={raw_input}, cache_write={raw_cache_write}, cache_read={raw_cache_read})")
 
-            # The second call should have cache reads where the first had writes
-            raw_cache_read = int(getattr(response2.usage, 'cache_read_input_tokens', 0) or 0)
-            self.assertEqual(data2.get("cache_read_tokens", 0), raw_cache_read)
-            if raw_cache_read > 0:
-                self.assertGreater(cache_read_2, 0, "Expected cache_read_tokens > 0 on second call")
+        # Whichever one is non-zero, verify the SDK captured it
+        if raw_cache_write > 0:
+            self.assertEqual(data["cache_write_tokens"], raw_cache_write)
+        if raw_cache_read > 0:
+            self.assertEqual(data["cache_read_tokens"], raw_cache_read)
+
+        print(f"\n  Anthropic cache test:")
+        print(f"    Raw response: input={raw_input}, cache_write={raw_cache_write}, cache_read={raw_cache_read}")
+        print(f"    Tokenr payload: input={data['input_tokens']}, "
+              f"cache_write={data.get('cache_write_tokens', 0)}, "
+              f"cache_read={data.get('cache_read_tokens', 0)}")
 
 
 if __name__ == "__main__":
